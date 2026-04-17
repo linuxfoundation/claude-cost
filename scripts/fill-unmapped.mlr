@@ -1,3 +1,5 @@
-if (!is_present($department) || $department == "") {
+if ($user_email == "(org service usage)") {
+  $department = "Claude Code Review";
+} elif (!is_present($department) || $department == "") {
   $department = "Unmapped";
 }
