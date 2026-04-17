@@ -1,0 +1,11 @@
+# Computes daily_rate_usd and mom_growth_pct for trend report.
+# Input must be sorted by (department, month) — done in the Makefile pipeline.
+# Uses out-of-stream variables to carry prior-row values across records.
+$daily_rate_usd = $total_net_spend_usd / $window_days;
+if (is_present(@prev_dept) && @prev_dept == $department && @prev_daily_rate > 0) {
+  $mom_growth_pct = ($daily_rate_usd / @prev_daily_rate - 1) * 100;
+} else {
+  $mom_growth_pct = "";
+}
+@prev_dept       = $department;
+@prev_daily_rate = $daily_rate_usd;

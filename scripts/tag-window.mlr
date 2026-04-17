@@ -1,0 +1,5 @@
+$window_start = ENV["WINDOW_START"];
+$window_end   = ENV["WINDOW_END"];
+$window_days  = int(ENV["WINDOW_DAYS"]);
+$month        = ENV["MONTH"];
+$source_file  = ENV["SRC"];
