@@ -17,15 +17,31 @@ The Makefile auto-detects the newest file matching each pattern.
 ## Usage
 
 ```bash
-make all          # build all reports
-make report       # spend by department/project
-make by-model     # spend by department × model (Opus/Sonnet/Haiku)
-make by-product   # spend by department × product (Claude Code, Chat, etc.)
-make forecast     # projected month-end spend based on daily run-rate
-make clean        # remove generated output files
+make all              # build all reports (auto-includes trend + forecast-growth when ≥ 2 spend files present)
+make report           # spend by department/project
+make by-model         # spend by department × model (Opus/Sonnet/Haiku)
+make by-product       # spend by department × product (Claude Code, Chat, etc.)
+make forecast         # flat run-rate projection through FORECAST_TO
+make top-users        # top 10 users by spend with EOM forecast
+make trend            # month-over-month spend trend per department (requires ≥ 2 spend files)
+make forecast-growth  # growth-adjusted forecast using MoM trend (requires ≥ 2 spend files)
+make list-inputs      # show all detected spend files with parsed date windows
+make clean            # remove generated output files
 ```
 
 Each target prints a table to the terminal and writes a Markdown file to `output/`.
+
+### Multi-month workflow
+
+Drop multiple spend exports into `input/` — the pipeline picks them all up automatically. Existing reports always reflect the **newest** file. `trend` and `forecast-growth` use all files to compute MoM growth rates.
+
+```bash
+# Drop last month's full export + this month's MTD, then:
+make all
+
+# Growth-adjusted EOY projection with conservative 30% monthly growth cap:
+make forecast-growth FORECAST_TO=2026-12-31 MAX_GROWTH_PCT=30
+```
 
 ## How billing groups work
 
@@ -61,6 +77,9 @@ The directory input is documented as an Okta export, but **any CSV with `user.em
 | `output/by-department.md` | Total spend and requests per billing group |
 | `output/by-department-model.md` | Breakdown by billing group × model family |
 | `output/by-department-product.md` | Breakdown by billing group × product |
-| `output/forecast.md` | Daily run-rate and projected month-end spend |
+| `output/forecast.md` | Flat run-rate projection through `FORECAST_TO` |
+| `output/top-users.md` | Top 10 users by spend with EOM forecast |
+| `output/trend.md` | MoM daily rate and growth % per department |
+| `output/forecast-growth.md` | Growth-adjusted projection (EOM + optional annual) |
 
 > `input/` and `output/` are gitignored — they contain confidential cost data.
