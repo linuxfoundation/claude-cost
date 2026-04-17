@@ -1,0 +1,3 @@
+if      ($model =~ "^claude_opus")    { $model = "Opus"; }
+elif    ($model =~ "^claude_sonnet")  { $model = "Sonnet"; }
+elif    ($model =~ "^claude_haiku")   { $model = "Haiku"; }

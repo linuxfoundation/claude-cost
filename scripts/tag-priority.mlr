@@ -1,0 +1,10 @@
+# Priority 1: project billing groups (AAIF, CNCF) take precedence over departments.
+# Priority 2: department groups (Education, Marketing Operations, etc.)
+# Priority 99: access-control-only group — excluded from billing.
+if (${group.name} == "AAIF Claude" || ${group.name} == "CNCF Claude") {
+  $priority = 1;
+} elif (${group.name} == "Claude unapproved access") {
+  $priority = 99;
+} else {
+  $priority = 2;
+}

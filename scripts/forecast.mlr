@@ -1,0 +1,5 @@
+# WINDOW_DAYS and MONTH_DAYS are passed as environment variables from the Makefile.
+$window_days        = int(ENV["WINDOW_DAYS"]);
+$month_days         = int(ENV["MONTH_DAYS"]);
+$daily_rate_usd     = $total_net_spend_usd / int(ENV["WINDOW_DAYS"]);
+$forecast_month_usd = $total_net_spend_usd + $daily_rate_usd * (int(ENV["MONTH_DAYS"]) - int(ENV["WINDOW_DAYS"]));

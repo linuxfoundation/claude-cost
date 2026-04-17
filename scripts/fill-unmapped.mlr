@@ -1,0 +1,3 @@
+if (!is_present($department) || $department == "") {
+  $department = "Unmapped";
+}
