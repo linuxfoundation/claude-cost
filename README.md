@@ -9,7 +9,7 @@ Generates department-level Claude spend reports by joining Anthropic cost export
 
 ## Setup
 
-1. Export a **spend report** from the [Anthropic Console](https://console.anthropic.com) and drop it in `input/`
+1. Export a **spend report** from Claude Enterprise analytics and drop it in `input/`
 2. Export a **directory group membership** CSV from Okta and drop it in `input/`
 
 The Makefile auto-detects the newest file matching each pattern.
