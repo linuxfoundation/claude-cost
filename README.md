@@ -74,12 +74,12 @@ The directory input is documented as an Okta export, but **any CSV with `user.em
 
 | File | Contents |
 |---|---|
-| `output/by-department.md` | Total spend and requests per billing group |
+| `output/by-department.md` | Active users, total spend, EOM-projected avg spend/user, and requests per billing group |
 | `output/by-department-model.md` | Breakdown by billing group × model family |
 | `output/by-department-product.md` | Breakdown by billing group × product |
-| `output/forecast.md` | Flat run-rate projection through `FORECAST_TO` |
+| `output/forecast.md` | Flat run-rate projection through `FORECAST_TO` with projected avg spend/user |
 | `output/top-users.md` | Top 10 users by spend with EOM forecast |
-| `output/trend.md` | MoM daily rate and growth % per department |
+| `output/trend.md` | MoM spend trend per department: active users, avg spend/user, spend growth %, user growth % |
 | `output/forecast-growth.md` | Growth-adjusted projection (EOM + optional annual) |
 
 > `input/` and `output/` are gitignored — they contain confidential cost data.

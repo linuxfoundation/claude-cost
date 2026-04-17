@@ -1,11 +1,22 @@
-# Computes daily_rate_usd and mom_growth_pct for trend report.
+# Computes daily_rate_usd, mom_growth_pct, and mom_user_growth_pct for trend report.
 # Input must be sorted by (department, month) — done in the Makefile pipeline.
-# Uses out-of-stream variables to carry prior-row values across records.
+# Carries prior-row spend rate AND active-user count via out-of-stream variables.
 $daily_rate_usd = $total_net_spend_usd / $window_days;
-if (is_present(@prev_dept) && @prev_dept == $department && @prev_daily_rate > 0) {
-  $mom_growth_pct = ($daily_rate_usd / @prev_daily_rate - 1) * 100;
+if (is_present(@prev_dept) && @prev_dept == $department) {
+  if (@prev_daily_rate > 0) {
+    $mom_growth_pct = ($daily_rate_usd / @prev_daily_rate - 1) * 100;
+  } else {
+    $mom_growth_pct = "";
+  }
+  if (@prev_active_users > 0) {
+    $mom_user_growth_pct = ($active_users / @prev_active_users - 1) * 100;
+  } else {
+    $mom_user_growth_pct = "";
+  }
 } else {
   $mom_growth_pct = "";
+  $mom_user_growth_pct = "";
 }
-@prev_dept       = $department;
-@prev_daily_rate = $daily_rate_usd;
+@prev_dept         = $department;
+@prev_daily_rate   = $daily_rate_usd;
+@prev_active_users = $active_users;

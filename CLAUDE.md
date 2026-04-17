@@ -84,8 +84,8 @@ Makefile                     orchestrates the pipeline; auto-detects all input f
 scripts/normalize-models.mlr put: maps claude_opus*/sonnet*/haiku* → Opus/Sonnet/Haiku
 scripts/fill-unmapped.mlr    put: sets $department = "Unmapped" (or known label) for unmatched spend rows
 scripts/tag-window.mlr       put: adds window_start/window_end/window_days/month/source_file columns
-scripts/trend.mlr            put: computes daily_rate_usd and mom_growth_pct (requires sorted input)
-scripts/forecast.mlr         put: flat run-rate forecast using ENV vars WINDOW_DAYS / FORECAST_DAYS
+scripts/trend.mlr            put: computes daily_rate_usd, mom_growth_pct, mom_user_growth_pct (requires sorted input)
+scripts/forecast.mlr         put: flat run-rate forecast + projected avg_spend_per_user_usd using ENV vars WINDOW_DAYS / FORECAST_DAYS
 scripts/growth-forecast.py   python: MoM growth-adjusted forecast with optional multi-month compounding
 output/group_sizes.csv       intermediate: member count per group (drives assignment logic)
 output/dept_map.csv          intermediate: email → billing group (one row per user)
@@ -97,8 +97,10 @@ output/*.csv / *.md          final reports
 ```
 
 Two parallel data paths:
-- **Single-file:** `SPEND` (newest file) → `joined.csv` → `by-department`, `by-model`, `by-product`, `forecast`, `top-users`
+- **Single-file:** `SPEND` (newest file) → `joined.csv` → `by-department.csv` → `forecast.csv` → `by-department.md` + `forecast.md`; also `by-model`, `by-product`, `top-users`
 - **Multi-file:** `SPEND_ALL` (all files) → `tagged-*.csv` → `spend-all.csv` → `joined-all.csv` → `trend`, `forecast-growth`
+
+Note: `by-department.md` reads from `forecast.csv` (not `by-department.csv` directly) so that `avg_spend_per_user_usd` reflects the EOM-projected spend rather than the MTD actuals.
 
 To update for a new month: drop new exports into `input/` and re-run `make all`.
 
@@ -107,8 +109,9 @@ To update for a new month: drop new exports into `input/` and re-run `make all`.
 The spend CSV is a pre-aggregated snapshot — there are no per-day rows. Forecast is linear run-rate:
 
 ```
-daily_rate   = total_net_spend_usd / window_days
-forecast_usd = total_net_spend_usd + daily_rate × max(0, forecast_days − window_days)
+daily_rate              = total_net_spend_usd / window_days
+forecast_usd            = total_net_spend_usd + daily_rate × max(0, forecast_days − window_days)
+avg_spend_per_user_usd  = forecast_usd / active_users   # projected full-period avg, not MTD avg
 ```
 
 `window_days` = days from `WINDOW_START` to `WINDOW_END` (inclusive).

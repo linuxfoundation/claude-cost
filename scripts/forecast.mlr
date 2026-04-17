@@ -5,3 +5,4 @@ $window_days    = int(ENV["WINDOW_DAYS"]);
 $forecast_days  = int(ENV["FORECAST_DAYS"]);
 $daily_rate_usd = $total_net_spend_usd / $window_days;
 $forecast_usd   = $total_net_spend_usd + $daily_rate_usd * max(0, $forecast_days - $window_days);
+$avg_spend_per_user_usd = $forecast_usd / $active_users;

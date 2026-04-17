@@ -129,16 +129,22 @@ output/joined.csv: $(SPEND) output/dept_map.csv | output
 
 output/by-department.csv: output/joined.csv
 	@mlr --csv \
-	  stats1 -a sum -f total_net_spend_usd,total_requests -g department \
-	  then sort -nr total_net_spend_usd_sum \
+	  stats1 -a sum -f total_net_spend_usd,total_requests -g user_email,department \
 	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests \
+	  then filter '$$total_net_spend_usd > 0' \
+	  then stats1 -a sum,count -f total_net_spend_usd,total_requests -g department \
+	  then cut -f department,total_net_spend_usd_sum,total_requests_sum,total_net_spend_usd_count \
+	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests,total_net_spend_usd_count,active_users \
+	  then put '$$avg_spend_per_user_usd = $$total_net_spend_usd / $$active_users' \
+	  then reorder -f department,active_users,total_net_spend_usd,avg_spend_per_user_usd,total_requests \
+	  then sort -nr total_net_spend_usd \
 	  output/joined.csv > $@
 
-output/by-department.md: output/by-department.csv
+output/by-department.md: output/forecast.csv
 	@echo "=== Spend by Department ==="
-	@mlr --icsv --opprint --ofmt '%.2f' cat output/by-department.csv
+	@mlr --icsv --opprint --ofmt '%.2f' cut -f department,active_users,total_net_spend_usd,avg_spend_per_user_usd,total_requests output/forecast.csv
 	@printf '## Spend by Department\n\n' > $@
-	@mlr --icsv --omd --ofmt '%.2f' cat output/by-department.csv >> $@
+	@mlr --icsv --omd --ofmt '%.2f' cut -f department,active_users,total_net_spend_usd,avg_spend_per_user_usd,total_requests output/forecast.csv >> $@
 
 output/by-department-model.csv: output/joined.csv
 	@mlr --csv \
@@ -190,9 +196,14 @@ top-users: output/top-users.md
 
 output/trend.csv: output/joined-all.csv
 	@mlr --csv \
-	  stats1 -a sum,max -f total_net_spend_usd,total_requests,window_days -g month,department \
-	  then cut -f month,department,total_net_spend_usd_sum,total_requests_sum,window_days_max \
+	  stats1 -a sum,max -f total_net_spend_usd,total_requests,window_days -g user_email,month,department \
+	  then cut -f user_email,month,department,total_net_spend_usd_sum,total_requests_sum,window_days_max \
 	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests,window_days_max,window_days \
+	  then filter '$$total_net_spend_usd > 0' \
+	  then stats1 -a sum,count,max -f total_net_spend_usd,total_requests,window_days -g month,department \
+	  then cut -f month,department,total_net_spend_usd_sum,total_net_spend_usd_count,total_requests_sum,window_days_max \
+	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_net_spend_usd_count,active_users,total_requests_sum,total_requests,window_days_max,window_days \
+	  then put '$$avg_spend_per_user_usd = $$total_net_spend_usd / $$active_users' \
 	  then sort -f department,month \
 	  then put -f scripts/trend.mlr \
 	  output/joined-all.csv > $@
