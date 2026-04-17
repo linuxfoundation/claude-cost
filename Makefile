@@ -3,9 +3,14 @@ OKTA   := $(lastword $(sort $(wildcard input/directory-groups-memberships_*.csv)
 
 WINDOW_START := $(shell basename "$(SPEND)" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
 WINDOW_END   := $(shell basename "$(SPEND)" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | tail -1)
-YEAR_MONTH   := $(shell echo "$(WINDOW_END)" | cut -c1-7)
 WINDOW_DAYS  := $(shell python3 -c "from datetime import date as D; print((D.fromisoformat('$(WINDOW_END)') - D.fromisoformat('$(WINDOW_START)')).days + 1)")
-MONTH_DAYS   := $(shell python3 -c "import calendar; y,m=map(int,'$(YEAR_MONTH)'.split('-')); print(calendar.monthrange(y,m)[1])")
+
+# Forecast horizon. Default: last day of the month containing WINDOW_END.
+# Override for longer windows, e.g. YTD → end of year:
+#   make forecast FORECAST_TO=2026-12-31
+# If FORECAST_TO <= WINDOW_END, the forecast reports actuals (no extrapolation).
+FORECAST_TO   ?= $(shell python3 -c "import calendar; from datetime import date as D; d=D.fromisoformat('$(WINDOW_END)'); print(D(d.year, d.month, calendar.monthrange(d.year, d.month)[1]).isoformat())")
+FORECAST_DAYS := $(shell python3 -c "from datetime import date as D; print((D.fromisoformat('$(FORECAST_TO)') - D.fromisoformat('$(WINDOW_START)')).days + 1)")
 
 # When a user belongs to multiple groups, assign them to the "smallest" group
 # (fewest members — the most specific, e.g. a project group over a department)
@@ -115,13 +120,13 @@ output/by-department-product.md: output/by-department-product.csv
 	@mlr --icsv --omd --ofmt '%.2f' cat output/by-department-product.csv >> $@
 
 output/forecast.csv: output/by-department.csv
-	@WINDOW_DAYS=$(WINDOW_DAYS) MONTH_DAYS=$(MONTH_DAYS) \
+	@WINDOW_DAYS=$(WINDOW_DAYS) FORECAST_DAYS=$(FORECAST_DAYS) \
 	  mlr --csv put -f scripts/forecast.mlr output/by-department.csv > $@
 
 output/forecast.md: output/forecast.csv
-	@echo "=== Month-End Forecast ($(YEAR_MONTH), window $(WINDOW_START) to $(WINDOW_END), $(WINDOW_DAYS)/$(MONTH_DAYS) days) ==="
+	@echo "=== Spend Forecast (through $(FORECAST_TO), window $(WINDOW_START) to $(WINDOW_END), $(WINDOW_DAYS)/$(FORECAST_DAYS) days) ==="
 	@mlr --icsv --opprint --ofmt '%.2f' cat output/forecast.csv
-	@printf '## Month-End Forecast ($(YEAR_MONTH))\n\nWindow: $(WINDOW_START) to $(WINDOW_END) ($(WINDOW_DAYS) of $(MONTH_DAYS) days)\n\n' > $@
+	@printf '## Spend Forecast (through $(FORECAST_TO))\n\nWindow: $(WINDOW_START) to $(WINDOW_END) ($(WINDOW_DAYS) of $(FORECAST_DAYS) days)\n\n' > $@
 	@mlr --icsv --omd --ofmt '%.2f' cat output/forecast.csv >> $@
 
 # Print group-size distribution and final billing assignment counts.

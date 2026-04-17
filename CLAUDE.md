@@ -23,7 +23,7 @@ A user's billing group is determined by the **smallest group** they belong to (f
 | `total_net_spend_usd` | Used for all cost calculations |
 | `account_uuid`, `total_gross_spend_usd` | Dropped at join time |
 
-The billing window dates are **encoded in the filename** and parsed by the Makefile to compute `WINDOW_DAYS` and `MONTH_DAYS` for forecasting.
+The billing window dates are **encoded in the filename** and parsed by the Makefile to compute `WINDOW_DAYS` and `FORECAST_DAYS` for forecasting. The window can span any range — partial month, full month, quarter, YTD, etc.
 
 ### Directory / group-membership export (`input/directory-groups-memberships_*.csv`)
 
@@ -42,8 +42,13 @@ The documented input is an Okta directory export, but **any CSV with `user.email
 |---|---|---|
 | `GROUP_PREF` | `smallest` | `largest` to assign users to their largest group instead |
 | `EXCLUDE_GROUPS` | _(empty)_ | Regex of group names to exclude from assignments entirely (e.g. `'^Bot accounts$$'`) |
+| `FORECAST_TO` | last day of `WINDOW_END`'s month | Override forecast horizon (e.g. `2026-12-31` for YTD → EOY projection) |
 
-Example: `make all GROUP_PREF=largest EXCLUDE_GROUPS='^Bot accounts$$'`
+Examples:
+```bash
+make all GROUP_PREF=largest EXCLUDE_GROUPS='^Bot accounts$$'
+make forecast FORECAST_TO=2026-12-31   # project YTD spend through year-end
+```
 
 ## Common commands
 
@@ -52,7 +57,7 @@ make all                # build all four reports
 make report             # output/by-department.md  — total spend per billing group
 make by-model           # output/by-department-model.md  — spend by group × model family
 make by-product         # output/by-department-product.md — spend by group × product
-make forecast           # output/forecast.md  — daily run-rate and projected month-end spend
+make forecast           # output/forecast.md  — daily run-rate and projected spend through FORECAST_TO
 make verify-departments # print group sizes and billing assignment counts
 make clean              # remove output/*.md and output/*.csv
 ```
@@ -65,7 +70,7 @@ Each `make <target>` prints a pretty terminal table to stdout AND writes a Markd
 Makefile                     orchestrates the pipeline; auto-detects newest input files
 scripts/normalize-models.mlr put: maps claude_opus*/sonnet*/haiku* → Opus/Sonnet/Haiku
 scripts/fill-unmapped.mlr    put: sets $department = "Unmapped" (or known label) for unmatched spend rows
-scripts/forecast.mlr         put: computes daily_rate and forecast_month using ENV vars
+scripts/forecast.mlr         put: computes daily_rate and forecast_usd using ENV vars WINDOW_DAYS / FORECAST_DAYS
 output/group_sizes.csv       intermediate: member count per group (drives assignment logic)
 output/dept_map.csv          intermediate: email → billing group (one row per user)
 output/joined.csv            intermediate: spend rows enriched with department
@@ -85,11 +90,18 @@ To update for a new month: drop new exports into `input/` and re-run `make all`.
 The spend CSV is a pre-aggregated snapshot — there are no per-day rows. Forecast is linear run-rate:
 
 ```
-daily_rate = total_net_spend_usd / window_days
-forecast   = total_net_spend_usd + daily_rate × (days_in_month − window_days)
+daily_rate   = total_net_spend_usd / window_days
+forecast_usd = total_net_spend_usd + daily_rate × max(0, forecast_days − window_days)
 ```
 
-`window_days` and `days_in_month` are computed from the spend filename via Python in the Makefile and passed to `scripts/forecast.mlr` as environment variables `WINDOW_DAYS` / `MONTH_DAYS`.
+`window_days` = days from `WINDOW_START` to `WINDOW_END` (inclusive).
+`forecast_days` = days from `WINDOW_START` to `FORECAST_TO` (inclusive).
+
+Both are computed from the spend filename (and the optional `FORECAST_TO` override) via Python in the Makefile, then passed to `scripts/forecast.mlr` as environment variables `WINDOW_DAYS` / `FORECAST_DAYS`.
+
+The `max(0, …)` clamp means: if the forecast horizon has already been reached or passed, the output reports actuals with no extrapolation (coefficient = 0). This handles full-month exports and past `FORECAST_TO` values gracefully.
+
+The window can span any range — partial month, multi-month, YTD — without breaking the three rollup reports. Only `make forecast` changes meaning depending on window shape; use `FORECAST_TO` to set an appropriate horizon.
 
 > **Note:** mlr 6.x does not support the `-s` flag for DSL variable injection; use `ENV["VAR"]` and export via `VAR=val mlr ...`.
 

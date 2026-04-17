@@ -1,5 +1,7 @@
-# WINDOW_DAYS and MONTH_DAYS are passed as environment variables from the Makefile.
-$window_days        = int(ENV["WINDOW_DAYS"]);
-$month_days         = int(ENV["MONTH_DAYS"]);
-$daily_rate_usd     = $total_net_spend_usd / int(ENV["WINDOW_DAYS"]);
-$forecast_month_usd = $total_net_spend_usd + $daily_rate_usd * (int(ENV["MONTH_DAYS"]) - int(ENV["WINDOW_DAYS"]));
+# WINDOW_DAYS and FORECAST_DAYS are passed as environment variables from the Makefile.
+# FORECAST_DAYS = days from WINDOW_START through FORECAST_TO (inclusive).
+# If FORECAST_DAYS <= WINDOW_DAYS, forecast = actuals (no extrapolation).
+$window_days    = int(ENV["WINDOW_DAYS"]);
+$forecast_days  = int(ENV["FORECAST_DAYS"]);
+$daily_rate_usd = $total_net_spend_usd / $window_days;
+$forecast_usd   = $total_net_spend_usd + $daily_rate_usd * max(0, $forecast_days - $window_days);

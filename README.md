@@ -37,6 +37,19 @@ make all GROUP_PREF=largest         # assign to broadest group instead
 make all EXCLUDE_GROUPS='^Bots$$'   # exclude a group from billing entirely
 ```
 
+## Time window flexibility
+
+The three rollup reports (`report`, `by-model`, `by-product`) are window-agnostic — they work on any export: partial month, full month, quarter, YTD, etc.
+
+`make forecast` projects spend linearly to a configurable horizon. The default horizon is the last day of the month containing the export's end date. Override with `FORECAST_TO` for longer windows:
+
+```bash
+make forecast                           # default: project through end of current month
+make forecast FORECAST_TO=2026-12-31    # YTD export → end-of-year projection
+```
+
+If `FORECAST_TO` falls on or before the window end date, the forecast reports actuals with no extrapolation.
+
 Run `make verify-departments` to see group sizes and final assignment counts.
 
 The directory input is documented as an Okta export, but **any CSV with `user.email` and `group.name` columns works** as the mapping source.
