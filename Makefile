@@ -43,7 +43,7 @@ output:
 # Compute the number of members per group from the directory.
 # Used to resolve users belonging to multiple groups (see dept_map target).
 output/group_sizes.csv: $(OKTA) | output
-	mlr --csv \
+	@mlr --csv \
 	  $(EXCLUDE_FILTER) stats1 -a count -f user.email -g group.name \
 	  then rename user.email_count,member_count \
 	  "$(OKTA)" > $@
@@ -54,7 +54,7 @@ output/group_sizes.csv: $(OKTA) | output
 # with alphabetical tiebreak), then keep only the first row per user.
 # Any email→group CSV with user_email and department columns can replace this.
 output/dept_map.csv: $(OKTA) output/group_sizes.csv | output
-	mlr --csv \
+	@mlr --csv \
 	  $(EXCLUDE_FILTER) join -j group.name -f output/group_sizes.csv \
 	  then sort -f user.email $(GROUP_SORT_FLAG) member_count -f group.name \
 	  then head -n 1 -g user.email \
@@ -66,7 +66,7 @@ output/dept_map.csv: $(OKTA) output/group_sizes.csv | output
 # Join spend with billing-group map in a single mlr chain.
 # reorder ensures consistent schema whether or not the user matched in the directory.
 output/joined.csv: $(SPEND) output/dept_map.csv | output
-	mlr --csv \
+	@mlr --csv \
 	  put '$$user_email = tolower($$user_email)' \
 	  then put -f scripts/normalize-models.mlr \
 	  then join -j user_email -f output/dept_map.csv --ur \
@@ -76,7 +76,7 @@ output/joined.csv: $(SPEND) output/dept_map.csv | output
 	  "$(SPEND)" > $@
 
 output/by-department.csv: output/joined.csv
-	mlr --csv \
+	@mlr --csv \
 	  stats1 -a sum -f total_net_spend_usd,total_requests -g department \
 	  then sort -nr total_net_spend_usd_sum \
 	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests \
@@ -84,12 +84,12 @@ output/by-department.csv: output/joined.csv
 
 output/by-department.md: output/by-department.csv
 	@echo "=== Spend by Department ==="
-	@mlr --icsv --opprint cat output/by-department.csv
+	@mlr --icsv --opprint --ofmt '%.2f' cat output/by-department.csv
 	@printf '## Spend by Department\n\n' > $@
-	@mlr --icsv --omd cat output/by-department.csv >> $@
+	@mlr --icsv --omd --ofmt '%.2f' cat output/by-department.csv >> $@
 
 output/by-department-model.csv: output/joined.csv
-	mlr --csv \
+	@mlr --csv \
 	  stats1 -a sum -f total_net_spend_usd,total_requests -g department,model \
 	  then sort -f department -nr total_net_spend_usd_sum \
 	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests \
@@ -97,12 +97,12 @@ output/by-department-model.csv: output/joined.csv
 
 output/by-department-model.md: output/by-department-model.csv
 	@echo "=== Spend by Department and Model ==="
-	@mlr --icsv --opprint cat output/by-department-model.csv
+	@mlr --icsv --opprint --ofmt '%.2f' cat output/by-department-model.csv
 	@printf '## Spend by Department and Model\n\n' > $@
-	@mlr --icsv --omd cat output/by-department-model.csv >> $@
+	@mlr --icsv --omd --ofmt '%.2f' cat output/by-department-model.csv >> $@
 
 output/by-department-product.csv: output/joined.csv
-	mlr --csv \
+	@mlr --csv \
 	  stats1 -a sum -f total_net_spend_usd,total_requests -g department,product \
 	  then sort -f department -nr total_net_spend_usd_sum \
 	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests \
@@ -110,19 +110,19 @@ output/by-department-product.csv: output/joined.csv
 
 output/by-department-product.md: output/by-department-product.csv
 	@echo "=== Spend by Department and Product ==="
-	@mlr --icsv --opprint cat output/by-department-product.csv
+	@mlr --icsv --opprint --ofmt '%.2f' cat output/by-department-product.csv
 	@printf '## Spend by Department and Product\n\n' > $@
-	@mlr --icsv --omd cat output/by-department-product.csv >> $@
+	@mlr --icsv --omd --ofmt '%.2f' cat output/by-department-product.csv >> $@
 
 output/forecast.csv: output/by-department.csv
-	WINDOW_DAYS=$(WINDOW_DAYS) MONTH_DAYS=$(MONTH_DAYS) \
+	@WINDOW_DAYS=$(WINDOW_DAYS) MONTH_DAYS=$(MONTH_DAYS) \
 	  mlr --csv put -f scripts/forecast.mlr output/by-department.csv > $@
 
 output/forecast.md: output/forecast.csv
 	@echo "=== Month-End Forecast ($(YEAR_MONTH), window $(WINDOW_START) to $(WINDOW_END), $(WINDOW_DAYS)/$(MONTH_DAYS) days) ==="
-	@mlr --icsv --opprint cat output/forecast.csv
+	@mlr --icsv --opprint --ofmt '%.2f' cat output/forecast.csv
 	@printf '## Month-End Forecast ($(YEAR_MONTH))\n\nWindow: $(WINDOW_START) to $(WINDOW_END) ($(WINDOW_DAYS) of $(MONTH_DAYS) days)\n\n' > $@
-	@mlr --icsv --omd cat output/forecast.csv >> $@
+	@mlr --icsv --omd --ofmt '%.2f' cat output/forecast.csv >> $@
 
 # Print group-size distribution and final billing assignment counts.
 # Surfaces any groups that tied on member count (resolved alphabetically).
