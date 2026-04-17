@@ -33,7 +33,7 @@ else
   EXCLUDE_FILTER := filter '!($${group.name} =~ "$(EXCLUDE_GROUPS)")' then
 endif
 
-.PHONY: all report by-model by-product forecast verify-departments clean
+.PHONY: all report by-model by-product forecast top-users verify-departments clean
 
 all: report by-model by-product forecast
 
@@ -122,6 +122,24 @@ output/by-department-product.md: output/by-department-product.csv
 output/forecast.csv: output/by-department.csv
 	@WINDOW_DAYS=$(WINDOW_DAYS) FORECAST_DAYS=$(FORECAST_DAYS) \
 	  mlr --csv put -f scripts/forecast.mlr output/by-department.csv > $@
+
+output/top-users.csv: output/joined.csv
+	@mlr --csv \
+	  stats1 -a sum -f total_net_spend_usd,total_requests -g user_email,department \
+	  then sort -nr total_net_spend_usd_sum \
+	  then head -n 10 \
+	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests \
+	  output/joined.csv | \
+	WINDOW_DAYS=$(WINDOW_DAYS) FORECAST_DAYS=$(FORECAST_DAYS) \
+	  mlr --csv put -f scripts/forecast.mlr > $@
+
+output/top-users.md: output/top-users.csv
+	@echo "=== Top 10 Users by Spend (through $(FORECAST_TO), window $(WINDOW_START) to $(WINDOW_END), $(WINDOW_DAYS)/$(FORECAST_DAYS) days) ==="
+	@mlr --icsv --opprint --ofmt '%.2f' cat output/top-users.csv
+	@printf '## Top 10 Users by Spend (through $(FORECAST_TO))\n\nWindow: $(WINDOW_START) to $(WINDOW_END) ($(WINDOW_DAYS) of $(FORECAST_DAYS) days)\n\n' > $@
+	@mlr --icsv --omd --ofmt '%.2f' cat output/top-users.csv >> $@
+
+top-users: output/top-users.md
 
 output/forecast.md: output/forecast.csv
 	@echo "=== Spend Forecast (through $(FORECAST_TO), window $(WINDOW_START) to $(WINDOW_END), $(WINDOW_DAYS)/$(FORECAST_DAYS) days) ==="
