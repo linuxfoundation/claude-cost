@@ -7,6 +7,27 @@ YEAR_MONTH   := $(shell echo "$(WINDOW_END)" | cut -c1-7)
 WINDOW_DAYS  := $(shell python3 -c "from datetime import date as D; print((D.fromisoformat('$(WINDOW_END)') - D.fromisoformat('$(WINDOW_START)')).days + 1)")
 MONTH_DAYS   := $(shell python3 -c "import calendar; y,m=map(int,'$(YEAR_MONTH)'.split('-')); print(calendar.monthrange(y,m)[1])")
 
+# When a user belongs to multiple groups, assign them to the "smallest" group
+# (fewest members — the most specific, e.g. a project group over a department)
+# or "largest" (broadest). Override at runtime: make all GROUP_PREF=largest
+GROUP_PREF ?= smallest
+
+# Optional regex of group names to exclude from billing assignments entirely.
+# Example: make all EXCLUDE_GROUPS='^Contractors$$'
+EXCLUDE_GROUPS ?=
+
+ifeq ($(GROUP_PREF),largest)
+  GROUP_SORT_FLAG := -nr
+else
+  GROUP_SORT_FLAG := -n
+endif
+
+ifeq ($(strip $(EXCLUDE_GROUPS)),)
+  EXCLUDE_FILTER :=
+else
+  EXCLUDE_FILTER := filter '!($${group.name} =~ "$(EXCLUDE_GROUPS)")' then
+endif
+
 .PHONY: all report by-model by-product forecast verify-departments clean
 
 all: report by-model by-product forecast
@@ -19,15 +40,23 @@ forecast:   output/forecast.md
 output:
 	mkdir -p output
 
-# Build email→billing-group map from Okta.
-# Project groups (AAIF Claude, CNCF Claude) have priority 1 over department groups (priority 2).
-# "Claude unapproved access" (priority 99) is excluded from billing entirely.
-# After sorting by email+priority, head -n 1 keeps the highest-priority row per user.
-output/dept_map.csv: $(OKTA) | output
+# Compute the number of members per group from the directory.
+# Used to resolve users belonging to multiple groups (see dept_map target).
+output/group_sizes.csv: $(OKTA) | output
 	mlr --csv \
-	  put -f scripts/tag-priority.mlr \
-	  then filter '$$priority < 99' \
-	  then sort -f user.email -n priority \
+	  $(EXCLUDE_FILTER) stats1 -a count -f user.email -g group.name \
+	  then rename user.email_count,member_count \
+	  "$(OKTA)" > $@
+
+# Build email→billing-group map.
+# Strategy: join group sizes onto each (user, group) row, then sort so the
+# winning group appears first per user (smallest or largest per GROUP_PREF,
+# with alphabetical tiebreak), then keep only the first row per user.
+# Any email→group CSV with user_email and department columns can replace this.
+output/dept_map.csv: $(OKTA) output/group_sizes.csv | output
+	mlr --csv \
+	  $(EXCLUDE_FILTER) join -j group.name -f output/group_sizes.csv \
+	  then sort -f user.email $(GROUP_SORT_FLAG) member_count -f group.name \
 	  then head -n 1 -g user.email \
 	  then cut -f user.email,group.name \
 	  then rename user.email,user_email,group.name,department \
@@ -35,7 +64,7 @@ output/dept_map.csv: $(OKTA) | output
 	  "$(OKTA)" > $@
 
 # Join spend with billing-group map in a single mlr chain.
-# reorder ensures consistent schema whether or not the user matched in Okta.
+# reorder ensures consistent schema whether or not the user matched in the directory.
 output/joined.csv: $(SPEND) output/dept_map.csv | output
 	mlr --csv \
 	  put '$$user_email = tolower($$user_email)' \
@@ -95,15 +124,19 @@ output/forecast.md: output/forecast.csv
 	@printf '## Month-End Forecast ($(YEAR_MONTH))\n\nWindow: $(WINDOW_START) to $(WINDOW_END) ($(WINDOW_DAYS) of $(MONTH_DAYS) days)\n\n' > $@
 	@mlr --icsv --omd cat output/forecast.csv >> $@
 
-# Verify: flag any user assigned to both AAIF Claude and CNCF Claude simultaneously.
-verify-departments: $(OKTA)
-	@mlr --csv \
-	  put -f scripts/tag-priority.mlr \
-	  then filter '$$priority == 1' \
-	  then count-distinct -f user.email \
-	  then filter '$$count > 1' \
-	  "$(OKTA)" | \
-	awk -F, 'NR>1{n++} END{if(n>0){print n" user(s) in multiple project groups - review tag-priority.mlr";exit 1}else{print "OK: no ambiguous project-group assignments"}}'
+# Print group-size distribution and final billing assignment counts.
+# Surfaces any groups that tied on member count (resolved alphabetically).
+verify-departments: output/dept_map.csv output/group_sizes.csv
+	@echo "=== Group sizes ==="
+	@mlr --icsv --opprint sort -nr member_count output/group_sizes.csv
+	@echo ""
+	@echo "=== Billing assignments ==="
+	@mlr --icsv --opprint \
+	  stats1 -a count -f user_email -g department \
+	  then sort -nr user_email_count \
+	  output/dept_map.csv
+	@ROWS=$$(mlr --csv count then cut -f count output/dept_map.csv | tail -1); \
+	  test "$$ROWS" -gt 0 || (echo "ERROR: dept_map is empty"; exit 1)
 
 clean:
 	rm -f output/*.md output/*.csv

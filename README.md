@@ -29,13 +29,17 @@ Each target prints a table to the terminal and writes a Markdown file to `output
 
 ## How billing groups work
 
-Users are assigned to a billing group in priority order:
+When a user belongs to multiple groups, they are assigned to the **smallest group** (fewest members) by default — smaller groups are typically more specific (a project sub-group beats a broad department). Override with `GROUP_PREF=largest`. Ties are broken alphabetically.
 
-1. **Project group** (AAIF Claude, CNCF Claude) — takes precedence over department
-2. **Department group** (Education, Sales, Products, etc.)
-3. Known org-level entries (e.g. `(org service usage)` → Claude Code Review)
+```bash
+make all                            # default: smallest-group wins
+make all GROUP_PREF=largest         # assign to broadest group instead
+make all EXCLUDE_GROUPS='^Bots$$'   # exclude a group from billing entirely
+```
 
-Run `make verify-departments` to check for data quality issues (a user assigned to multiple project groups).
+Run `make verify-departments` to see group sizes and final assignment counts.
+
+The directory input is documented as an Okta export, but **any CSV with `user.email` and `group.name` columns works** as the mapping source.
 
 ## Output files
 
