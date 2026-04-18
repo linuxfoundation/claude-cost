@@ -1,7 +1,17 @@
 SPEND_ALL := $(sort $(wildcard input/spend-report-*.csv))
 SPEND     := $(lastword $(SPEND_ALL))
-OKTA      := $(lastword $(sort $(wildcard input/directory-groups-memberships_*.csv)))
+ACCESS_OKTA := $(lastword $(sort $(wildcard input/access-users-app-instances_*.csv)))
+DIR_OKTA    := $(lastword $(sort $(wildcard input/directory-groups-memberships_*.csv)))
+OKTA        := $(or $(DIR_OKTA),$(ACCESS_OKTA))
 N_SPEND   := $(words $(SPEND_ALL))
+
+# Optional config files — copy the .example.csv files to activate (see README).
+BILLING_GROUPS_CSV    := $(wildcard config/billing-groups.csv)
+USER_OVERRIDES_CSV    := $(wildcard config/user-overrides.csv)
+# When billing-groups.csv present, filter Okta input to only those groups before resolution.
+BILLING_GROUPS_FILTER := $(if $(BILLING_GROUPS_CSV), then join -j group.name -f $(BILLING_GROUPS_CSV),)
+# When user-overrides.csv present, apply per-user department overrides after fill-unmapped.
+USER_OVERRIDES_STAGE  := $(if $(USER_OVERRIDES_CSV), then join -j user_email --ur -f $(USER_OVERRIDES_CSV) then put 'if (is_present($$department_override) && $$department_override != "") { $$department = $$department_override }' then cut -x -f department_override,)
 TAGGED    := $(patsubst input/spend-report-%.csv,output/tagged-%.csv,$(SPEND_ALL))
 
 # Cap on MoM growth rate applied to the growth-adjusted forecast.
@@ -90,13 +100,16 @@ output/joined-all.csv: output/spend-all.csv output/dept_map.csv
 	  then put -f scripts/normalize-models.mlr \
 	  then join -j user_email -f output/dept_map.csv --ur \
 	  then put -f scripts/fill-unmapped.mlr \
+	  $(USER_OVERRIDES_STAGE) \
 	  then reorder -f user_email,department,month,window_start,window_end,window_days \
 	  then cut -x -f account_uuid,total_gross_spend_usd \
 	  output/spend-all.csv > $@
 
 output/group_sizes.csv: $(OKTA) | output
 	@mlr --csv \
-	  $(EXCLUDE_FILTER) stats1 -a count -f user.email -g group.name \
+	  filter '$${group.name} != ""' \
+	  $(BILLING_GROUPS_FILTER) \
+	  then $(EXCLUDE_FILTER) stats1 -a count -f user.email -g group.name \
 	  then rename user.email_count,member_count \
 	  "$(OKTA)" > $@
 
@@ -107,7 +120,9 @@ output/group_sizes.csv: $(OKTA) | output
 # Any email→group CSV with user_email and department columns can replace this.
 output/dept_map.csv: $(OKTA) output/group_sizes.csv | output
 	@mlr --csv \
-	  $(EXCLUDE_FILTER) join -j group.name -f output/group_sizes.csv \
+	  filter '$${group.name} != ""' \
+	  $(BILLING_GROUPS_FILTER) \
+	  then $(EXCLUDE_FILTER) join -j group.name -f output/group_sizes.csv \
 	  then sort -f user.email $(GROUP_SORT_FLAG) member_count -f group.name \
 	  then head -n 1 -g user.email \
 	  then cut -f user.email,group.name \
@@ -123,6 +138,7 @@ output/joined.csv: $(SPEND) output/dept_map.csv | output
 	  then put -f scripts/normalize-models.mlr \
 	  then join -j user_email -f output/dept_map.csv --ur \
 	  then put -f scripts/fill-unmapped.mlr \
+	  $(USER_OVERRIDES_STAGE) \
 	  then reorder -f user_email,department \
 	  then cut -x -f account_uuid,total_gross_spend_usd \
 	  "$(SPEND)" > $@

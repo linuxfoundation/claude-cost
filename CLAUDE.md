@@ -27,7 +27,14 @@ The billing window dates are **encoded in the filename** and parsed by the Makef
 
 ### Directory / group-membership export (`input/directory-groups-memberships_*.csv`)
 
-The documented input is an Okta directory export, but **any CSV with `user.email` and `group.name` columns works**. Key columns used: `user.email`, `group.name`. All other columns are discarded at build time.
+Any CSV with `user.email` and `group.name` columns works. Key columns used: `user.email`, `group.name`. All other columns are discarded at build time.
+
+**Critical:** the export must include only the groups that represent billing units (departments, projects). An unfiltered Okta export contains every group the user belongs to; the smallest-group heuristic then latches onto narrow infra groups instead of billing groups. Two options:
+
+1. **Filter at export time** (recommended): in Okta, use Reports → Reports → Group Membership, filtered to the groups assigned to Claude roles. This is the correct source of truth.
+2. **Pipeline-side filter** via `config/billing-groups.csv` (see Config files below): drop an unfiltered export and let the pipeline ignore non-billing groups.
+
+Filename precedence: `directory-groups-memberships_*.csv` (preferred) → `access-users-app-instances_*.csv` (fallback for Okta app-access exports).
 
 **Billing group resolution** — when a user belongs to multiple groups:
 
@@ -35,6 +42,7 @@ The documented input is an Okta directory export, but **any CSV with `user.email
 - Ties in member count are broken alphabetically by group name (deterministic).
 - Run `make verify-departments` to see group sizes and final assignment counts.
 - Spend rows with no directory match land in the synthetic `Unmapped` group.
+- Users with direct (non-group) Okta assignments will be `Unmapped`; fix in the IdP or use `config/user-overrides.csv`.
 
 ### Makefile knobs
 
@@ -51,6 +59,17 @@ make all GROUP_PREF=largest EXCLUDE_GROUPS='^Bot accounts$$'
 make forecast FORECAST_TO=2026-12-31            # project YTD spend through year-end (flat run-rate)
 make forecast-growth FORECAST_TO=2026-12-31 MAX_GROWTH_PCT=30  # growth-adjusted EOY projection
 ```
+
+### Config files (optional, gitignored)
+
+Two CSV files in `config/` tune group resolution without touching the Okta export or scripts. Copy the `.example.csv` templates to activate:
+
+| File | Columns | Effect |
+|---|---|---|
+| `config/billing-groups.csv` | `group.name` | Allowlist — only these groups are eligible for billing attribution. Applied before smallest-group resolution. |
+| `config/user-overrides.csv` | `user_email`, `department_override` | Per-user overrides applied last. Handles tie-breaks, policy exceptions, and Unmapped catch-alls. |
+
+Both files are optional. When absent, the pipeline behaves as before (no filtering, no overrides).
 
 ## Common commands
 
@@ -80,20 +99,22 @@ Drop multiple spend exports into `input/` — the pipeline auto-detects all of t
 ## Architecture
 
 ```
-Makefile                     orchestrates the pipeline; auto-detects all input files
-scripts/normalize-models.mlr put: maps claude_opus*/sonnet*/haiku* → Opus/Sonnet/Haiku
-scripts/fill-unmapped.mlr    put: sets $department = "Unmapped" (or known label) for unmatched spend rows
-scripts/tag-window.mlr       put: adds window_start/window_end/window_days/month/source_file columns
-scripts/trend.mlr            put: computes daily_rate_usd, mom_growth_pct, mom_user_growth_pct (requires sorted input)
-scripts/forecast.mlr         put: flat run-rate forecast + projected avg_spend_per_user_usd using ENV vars WINDOW_DAYS / FORECAST_DAYS
-scripts/growth-forecast.py   python: MoM growth-adjusted forecast with optional multi-month compounding
-output/group_sizes.csv       intermediate: member count per group (drives assignment logic)
-output/dept_map.csv          intermediate: email → billing group (one row per user)
-output/joined.csv            intermediate: single-file spend rows enriched with department (newest file)
-output/tagged-*.csv          intermediate: per-file spend rows tagged with window metadata
-output/spend-all.csv         intermediate: all months concatenated and deduped
-output/joined-all.csv        intermediate: all-months spend rows enriched with department
-output/*.csv / *.md          final reports
+Makefile                       orchestrates the pipeline; auto-detects all input files
+config/billing-groups.csv      optional: allowlist of billing groups (gitignored; .example.csv committed)
+config/user-overrides.csv      optional: per-user department overrides (gitignored; .example.csv committed)
+scripts/normalize-models.mlr   put: maps claude_opus*/sonnet*/haiku* → Opus/Sonnet/Haiku
+scripts/fill-unmapped.mlr      put: sets $department = "Unmapped" (or known label) for unmatched spend rows
+scripts/tag-window.mlr         put: adds window_start/window_end/window_days/month/source_file columns
+scripts/trend.mlr              put: computes daily_rate_usd, mom_growth_pct, mom_user_growth_pct (requires sorted input)
+scripts/forecast.mlr           put: flat run-rate forecast + projected avg_spend_per_user_usd using ENV vars WINDOW_DAYS / FORECAST_DAYS
+scripts/growth-forecast.py     python: MoM growth-adjusted forecast with optional multi-month compounding
+output/group_sizes.csv         intermediate: member count per group (drives assignment logic)
+output/dept_map.csv            intermediate: email → billing group (one row per user, after overrides)
+output/joined.csv              intermediate: single-file spend rows enriched with department (newest file)
+output/tagged-*.csv            intermediate: per-file spend rows tagged with window metadata
+output/spend-all.csv           intermediate: all months concatenated and deduped
+output/joined-all.csv          intermediate: all-months spend rows enriched with department
+output/*.csv / *.md            final reports
 ```
 
 Two parallel data paths:
