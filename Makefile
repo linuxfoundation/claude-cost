@@ -210,6 +210,25 @@ output/top-users.md: output/top-users.csv
 
 top-users: output/top-users.md
 
+output/top-users-by-dept.csv: output/joined.csv
+	@mlr --csv \
+	  stats1 -a sum -f total_net_spend_usd,total_requests -g user_email,department \
+	  then sort -f department -nr total_net_spend_usd_sum \
+	  then head -n 5 -g department \
+	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests \
+	  then reorder -f department,user_email,total_net_spend_usd,total_requests \
+	  output/joined.csv | \
+	WINDOW_DAYS=$(WINDOW_DAYS) FORECAST_DAYS=$(FORECAST_DAYS) \
+	  mlr --csv put -f scripts/forecast.mlr > $@
+
+output/top-users-by-dept.md: output/top-users-by-dept.csv
+	@echo "=== Top 5 Users per Department (through $(FORECAST_TO), window $(WINDOW_START) to $(WINDOW_END)) ==="
+	@mlr --icsv --opprint --ofmt '%.2f' cat output/top-users-by-dept.csv
+	@printf '## Top 5 Users per Department (through $(FORECAST_TO))\n\nWindow: $(WINDOW_START) to $(WINDOW_END) ($(WINDOW_DAYS) of $(FORECAST_DAYS) days)\n\n' > $@
+	@mlr --icsv --omd --ofmt '%.2f' cat output/top-users-by-dept.csv >> $@
+
+top-users-by-dept: output/top-users-by-dept.md
+
 output/trend.csv: output/joined-all.csv
 	@mlr --csv \
 	  stats1 -a sum,max -f total_net_spend_usd,total_requests,window_days -g user_email,month,department \
