@@ -6,10 +6,13 @@ OKTA        := $(or $(DIR_OKTA),$(ACCESS_OKTA))
 N_SPEND   := $(words $(SPEND_ALL))
 
 # Optional config files — copy the .example.csv files to activate (see README).
-BILLING_GROUPS_CSV    := $(wildcard config/billing-groups.csv)
 USER_OVERRIDES_CSV    := $(wildcard config/user-overrides.csv)
-# When billing-groups.csv present, filter Okta input to only those groups before resolution.
-BILLING_GROUPS_FILTER := $(if $(BILLING_GROUPS_CSV), then join -j group.name -f $(BILLING_GROUPS_CSV),)
+
+# Regex of group names to INCLUDE for billing attribution.
+# Only groups matching this pattern are eligible. Default: empty (all groups included).
+# Override: make all INCLUDE_GROUPS='Claude|Products'
+# When empty, all groups pass through (use EXCLUDE_GROUPS to remove non-billing groups).
+INCLUDE_GROUPS ?=
 # When user-overrides.csv present, apply per-user department overrides after fill-unmapped.
 USER_OVERRIDES_STAGE  := $(if $(USER_OVERRIDES_CSV), then join -j user_email --ur -f $(USER_OVERRIDES_CSV) then put 'if (is_present($$department_override) && $$department_override != "") { $$department = $$department_override }' then cut -x -f department_override,)
 TAGGED    := $(patsubst input/spend-report-%.csv,output/tagged-%.csv,$(SPEND_ALL))
@@ -35,8 +38,14 @@ FORECAST_DAYS := $(shell python3 -c "from datetime import date as D; print((D.fr
 GROUP_PREF ?= smallest
 
 # Optional regex of group names to exclude from billing assignments entirely.
-# Example: make all EXCLUDE_GROUPS='^Contractors$$'
-EXCLUDE_GROUPS ?=
+# Default: exclude non-billing groups (Large Projects Leads, Claude unapproved access).
+# Override: make all EXCLUDE_GROUPS='^Contractors$$'
+EXCLUDE_GROUPS ?= Claude unapproved access
+
+# Optional regex of model names to exclude from all spend calculations.
+# Default: exclude claude_mythos_preview (refunded; would skew costs).
+# Override: make all EXCLUDE_MODELS='' to include everything.
+EXCLUDE_MODELS ?= mythos
 
 ifeq ($(GROUP_PREF),largest)
   GROUP_SORT_FLAG := -nr
@@ -50,13 +59,25 @@ else
   EXCLUDE_FILTER := filter '!($${group.name} =~ "$(EXCLUDE_GROUPS)")' then
 endif
 
-.PHONY: all report by-model by-product forecast top-users trend forecast-growth list-inputs verify-departments clean
+ifeq ($(strip $(INCLUDE_GROUPS)),)
+  INCLUDE_FILTER :=
+else
+  INCLUDE_FILTER := filter '$${group.name} =~ "(?i)$(INCLUDE_GROUPS)"' then
+endif
+
+ifeq ($(strip $(EXCLUDE_MODELS)),)
+  MODELS_FILTER :=
+else
+  MODELS_FILTER := filter '!($$model =~ "(?i)$(EXCLUDE_MODELS)")' then
+endif
+
+.PHONY: all report by-model by-product forecast forecast-cap top-users trend forecast-growth list-inputs verify-departments clean
 
 ifeq ($(shell test $(N_SPEND) -ge 2 && echo yes),yes)
   ALL_EXTRA := trend forecast-growth
 endif
 
-all: report by-model by-product forecast $(ALL_EXTRA)
+all: report by-model by-product forecast forecast-cap $(ALL_EXTRA)
 
 list-inputs:
 	@for f in $(SPEND_ALL); do \
@@ -71,7 +92,8 @@ list-inputs:
 report:     output/by-department.md
 by-model:   output/by-department-model.md
 by-product: output/by-department-product.md
-forecast:   output/forecast.md
+forecast:     output/forecast.md
+forecast-cap: output/forecast-cap.md
 
 output:
 	mkdir -p output
@@ -85,7 +107,7 @@ output/tagged-%.csv: input/spend-report-%.csv | output
 	 MO=$${WE:0:7}; \
 	 SRC=$$(basename "$<"); \
 	 WINDOW_START=$$WS WINDOW_END=$$WE WINDOW_DAYS=$$WD MONTH=$$MO SRC=$$SRC \
-	 mlr --csv put -f scripts/tag-window.mlr "$<" > $@
+	 mlr --csv put -f scripts/tag-window.mlr then put 'unset $$user_id' "$<" > $@
 
 output/spend-all.csv: $(TAGGED)
 	@for f in $^; do mlr --csv --ho head -n 1 then cut -f month "$$f"; done \
@@ -97,7 +119,7 @@ output/spend-all.csv: $(TAGGED)
 output/joined-all.csv: output/spend-all.csv output/dept_map.csv
 	@mlr --csv \
 	  put '$$user_email = tolower($$user_email)' \
-	  then put -f scripts/normalize-models.mlr \
+	  then $(MODELS_FILTER) put -f scripts/normalize-models.mlr \
 	  then join -j user_email -f output/dept_map.csv --ur \
 	  then put -f scripts/fill-unmapped.mlr \
 	  $(USER_OVERRIDES_STAGE) \
@@ -108,8 +130,7 @@ output/joined-all.csv: output/spend-all.csv output/dept_map.csv
 output/group_sizes.csv: $(OKTA) | output
 	@mlr --csv \
 	  filter '$${group.name} != ""' \
-	  $(BILLING_GROUPS_FILTER) \
-	  then $(EXCLUDE_FILTER) stats1 -a count -f user.email -g group.name \
+	  then $(INCLUDE_FILTER) $(EXCLUDE_FILTER) stats1 -a count -f user.email -g group.name \
 	  then rename user.email_count,member_count \
 	  "$(OKTA)" > $@
 
@@ -121,8 +142,7 @@ output/group_sizes.csv: $(OKTA) | output
 output/dept_map.csv: $(OKTA) output/group_sizes.csv | output
 	@mlr --csv \
 	  filter '$${group.name} != ""' \
-	  $(BILLING_GROUPS_FILTER) \
-	  then $(EXCLUDE_FILTER) join -j group.name -f output/group_sizes.csv \
+	  then $(INCLUDE_FILTER) $(EXCLUDE_FILTER) join -j group.name -f output/group_sizes.csv \
 	  then sort -f user.email $(GROUP_SORT_FLAG) member_count -f group.name \
 	  then head -n 1 -g user.email \
 	  then cut -f user.email,group.name \
@@ -135,7 +155,7 @@ output/dept_map.csv: $(OKTA) output/group_sizes.csv | output
 output/joined.csv: $(SPEND) output/dept_map.csv | output
 	@mlr --csv \
 	  put '$$user_email = tolower($$user_email)' \
-	  then put -f scripts/normalize-models.mlr \
+	  then $(MODELS_FILTER) put -f scripts/normalize-models.mlr \
 	  then join -j user_email -f output/dept_map.csv --ur \
 	  then put -f scripts/fill-unmapped.mlr \
 	  $(USER_OVERRIDES_STAGE) \
@@ -187,6 +207,43 @@ output/by-department-product.md: output/by-department-product.csv
 	@mlr --icsv --opprint --ofmt '%.2f' cat output/by-department-product.csv
 	@printf '## Spend by Department and Product\n\n' > $@
 	@mlr --icsv --omd --ofmt '%.2f' cat output/by-department-product.csv >> $@
+
+# Gross joined data (all models, no exclusions) — used for cap/limit forecasting.
+# This includes e.g. mythos which Anthropic counts against the account spend cap
+# even when it is refunded, so it reflects what the console "max spend" sees.
+output/joined-cap.csv: $(SPEND) output/dept_map.csv | output
+	@mlr --csv \
+	  put '$$user_email = tolower($$user_email)' \
+	  then put -f scripts/normalize-models.mlr \
+	  then join -j user_email -f output/dept_map.csv --ur \
+	  then put -f scripts/fill-unmapped.mlr \
+	  $(USER_OVERRIDES_STAGE) \
+	  then reorder -f user_email,department \
+	  then cut -x -f account_uuid,total_gross_spend_usd \
+	  "$(SPEND)" > $@
+
+output/by-department-cap.csv: output/joined-cap.csv
+	@mlr --csv \
+	  stats1 -a sum -f total_net_spend_usd,total_requests -g user_email,department \
+	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests \
+	  then filter '$$total_net_spend_usd > 0' \
+	  then stats1 -a sum,count -f total_net_spend_usd,total_requests -g department \
+	  then cut -f department,total_net_spend_usd_sum,total_requests_sum,total_net_spend_usd_count \
+	  then rename total_net_spend_usd_sum,total_net_spend_usd,total_requests_sum,total_requests,total_net_spend_usd_count,active_users \
+	  then put '$$avg_spend_per_user_usd = $$total_net_spend_usd / $$active_users' \
+	  then reorder -f department,active_users,total_net_spend_usd,avg_spend_per_user_usd,total_requests \
+	  then sort -nr total_net_spend_usd \
+	  output/joined-cap.csv > $@
+
+output/forecast-cap.csv: output/by-department-cap.csv
+	@WINDOW_DAYS=$(WINDOW_DAYS) FORECAST_DAYS=$(FORECAST_DAYS) \
+	  mlr --csv put -f scripts/forecast.mlr output/by-department-cap.csv > $@
+
+output/forecast-cap.md: output/forecast-cap.csv
+	@echo "=== Spend Cap Forecast / console limit view (through $(FORECAST_TO), includes all models) ==="
+	@mlr --icsv --opprint --ofmt '%.2f' cat output/forecast-cap.csv
+	@printf '## Spend Cap Forecast (through $(FORECAST_TO))\n\nIncludes all models (e.g. mythos). Use this to manage your Anthropic account spend limit.\n\nWindow: $(WINDOW_START) to $(WINDOW_END) ($(WINDOW_DAYS) of $(FORECAST_DAYS) days)\n\n' > $@
+	@mlr --icsv --omd --ofmt '%.2f' cat output/forecast-cap.csv >> $@
 
 output/forecast.csv: output/by-department.csv
 	@WINDOW_DAYS=$(WINDOW_DAYS) FORECAST_DAYS=$(FORECAST_DAYS) \
